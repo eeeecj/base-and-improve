@@ -44,6 +44,7 @@ type ExecuteResultType int32
 const (
 	EXECUTE_SUCCESS ExecuteResultType = iota
 	EXECUTE_TABLE_FULL
+	EXECUTE_DUPLICATE_KEY
 )
 
 const (
@@ -108,6 +109,44 @@ func tableEnd(table *Table) *Cursor {
 	return cursor
 }
 
+func tableFind(table *Table, key int) *Cursor {
+	rootPageNum := table.rootPageNum
+	rootNode := getPage(table.Pager, rootPageNum)
+	rootNodeType := getNodeType(rootNode)
+	if rootNodeType == NODE_LEAF {
+		return leafNodeFind(table, rootPageNum, key)
+	} else {
+		fmt.Printf("Need to implement searching an internal node\n")
+		os.Exit(0)
+		return nil
+	}
+}
+
+func leafNodeFind(table *Table, pageNum int, key int) *Cursor {
+	node := getPage(table.Pager, pageNum)
+	numCells, _ := leafNodeNumCells(node)
+	cursor := &Cursor{}
+	cursor.table = table
+	cursor.pageNum = pageNum
+
+	left, right := 0, numCells-1
+	for left <= right {
+		mid := left + (right-left)/2
+		p := (*[LEAF_NODE_KEY_SIZE]byte)(leafNodeKey(node, mid))
+		midKey := int(BytesToInt32(p[:]))
+		if key == midKey {
+			cursor.cellNum = mid
+			return cursor
+		} else if key >= midKey {
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+	cursor.cellNum = left
+	return cursor
+}
+
 func cursorAdvance(cursor *Cursor) {
 	pageNum := cursor.pageNum
 	node := getPage(cursor.table.Pager, pageNum)
@@ -169,7 +208,6 @@ func pageFlush(pager *Pager, pageNum int) error {
 		return fmt.Errorf("offset %v", offset)
 	}
 	buf := (*[PAGE_SIZE]byte)(pager.pages[pageNum])
-	fmt.Println(buf)
 	bytesWritten, err := pager.fs.WriteAt(buf[:], PAGE_SIZE)
 	if err != nil {
 		return fmt.Errorf("write %v", err)
@@ -213,6 +251,8 @@ func main() {
 		switch executeStatement(&statement, table) {
 		case EXECUTE_SUCCESS:
 			fmt.Println("Executed.")
+		case EXECUTE_DUPLICATE_KEY:
+			fmt.Println("Error: Duplicate key.")
 		case EXECUTE_TABLE_FULL:
 			fmt.Println("Err:Table full.")
 		}
@@ -240,7 +280,7 @@ func getPage(pager *Pager, pageNum int) unsafe.Pointer {
 				panic(err)
 			}
 		}
-		pager.pages[pageNum] = unsafe.Pointer(&page)
+		pager.pages[pageNum] = unsafe.Pointer(&page[0])
 		if pageNum >= pager.numPages {
 			pager.numPages = pageNum + 1
 		}
@@ -273,6 +313,7 @@ func serializeRow(source *Row, destination unsafe.Pointer) {
 	copy(q[ID_OFFSET:ID_SIZE], id)
 	copy(q[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE], source.UserName)
 	copy(q[EMAIL_OFFSET:ROW_SIZE], source.Email)
+	fmt.Println(q)
 }
 
 func deserializeRow(source unsafe.Pointer, destination *Row) {
@@ -337,11 +378,21 @@ func executeSelect(statement *Statement, table *Table) ExecuteResultType {
 
 func executeInsert(statement *Statement, table *Table) ExecuteResultType {
 	node := getPage(table.Pager, table.rootPageNum)
-	if cells, _ := leafNodeNumCells(node); cells >= LEAF_NODE_MAX_CELLS {
+	numCells, _ := leafNodeNumCells(node)
+	if numCells >= LEAF_NODE_MAX_CELLS {
 		return EXECUTE_TABLE_FULL
 	}
+
 	row := statement.Row
-	cursor := tableEnd(table)
+	cursor := tableFind(table, int(row.ID))
+	if cursor.cellNum < numCells {
+		p := leafNodeKey(node, cursor.cellNum)
+		buf := (*[LEAF_NODE_KEY_SIZE]byte)(p)
+		indexKey := BytesToInt32(buf[:])
+		if indexKey == row.ID {
+			return EXECUTE_DUPLICATE_KEY
+		}
+	}
 	leafNodeInsert(cursor, int(row.ID), row)
 	return EXECUTE_SUCCESS
 }

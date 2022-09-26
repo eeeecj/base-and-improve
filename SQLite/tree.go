@@ -72,6 +72,7 @@ func leafNodeValue(node unsafe.Pointer, cellNum int) unsafe.Pointer {
 }
 
 func initLeafNode(node unsafe.Pointer) {
+	setNodeType(node, NODE_LEAF)
 	_, pp := leafNodeNumCells(node)
 	leafNodeNumCellsSet(pp, 0)
 }
@@ -94,4 +95,16 @@ func leafNodeInsert(cursor *Cursor, key int, value *Row) {
 	leafNodeNumCellsSet(p, cells+1)
 	leafNodeKeySet(leafNodeKey(node, cursor.cellNum), key)
 	serializeRow(value, leafNodeValue(node, cursor.cellNum))
+}
+
+func getNodeType(node unsafe.Pointer) NodeType {
+	p := (*[COMMON_NODE_HEADER_SIZE]byte)(node)
+	res := p[NODE_TYPE_OFFSET]
+	return NodeType(res)
+}
+
+func setNodeType(node unsafe.Pointer, t NodeType) {
+	p := (*[COMMON_NODE_HEADER_SIZE]byte)(node)
+	ty := Uint32ToBytes(int32(t))
+	copy(p[NODE_TYPE_OFFSET:NODE_TYPE_OFFSET+NODE_TYPE_SIZE], ty[len(ty)-1:])
 }
