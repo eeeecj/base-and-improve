@@ -12,6 +12,7 @@ import (
 	"unsafe"
 )
 
+// 定义处理结果状态
 type metaCommandType int32
 
 const (
@@ -19,6 +20,7 @@ const (
 	metaCommandUnRecognizedCommand
 )
 
+// 定义语句类型
 type StatementType int32
 
 const (
@@ -31,6 +33,7 @@ type Statement struct {
 	Row           *Row
 }
 
+// 定义预处理结果类型
 type PrepareType int32
 
 const (
@@ -39,6 +42,7 @@ const (
 	PREPARE_NEGATIVE_ID
 )
 
+// 定义执行结果类型
 type ExecuteResultType int32
 
 const (
@@ -47,6 +51,7 @@ const (
 	EXECUTE_DUPLICATE_KEY
 )
 
+// 定义表格数据大小和偏移量
 const (
 	ID_SIZE         = 4
 	USERNAME_SIZE   = 32
@@ -57,17 +62,20 @@ const (
 	ROW_SIZE        = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE
 )
 
+// 定义表格结构
 type Row struct {
 	ID       int32
 	UserName string
 	Email    string
 }
 
+// 定义页表大小
 const (
 	PAGE_SIZE       = 4094
 	TABLE_MAX_PAGES = 100
 )
 
+// 存储数据的页表项
 type Pager struct {
 	fs         *os.File
 	fileLength int64
@@ -75,6 +83,7 @@ type Pager struct {
 	numPages   int
 }
 
+// 表格结构
 type Table struct {
 	rootPageNum int
 	Pager       *Pager
@@ -87,74 +96,141 @@ type Cursor struct {
 	tableEnd bool
 }
 
-func tableStart(table *Table) *Cursor {
-	cursor := &Cursor{}
-	cursor.table = table
-	cursor.pageNum = table.rootPageNum
-	cursor.cellNum = 0
-	rootNode := getPage(table.Pager, table.rootPageNum)
-	numCells, _ := leafNodeNumCells(rootNode)
-	cursor.tableEnd = (numCells == 0)
-	return cursor
+// 打印常量
+func printConstants() {
+	fmt.Printf("ROW_SIZE: %d\n", ROW_SIZE)
+	fmt.Printf("COMMON_NODE_HEADER_SIZE: %d\n", COMMON_NODE_HEADER_SIZE)
+	fmt.Printf("LEAF_NODE_HEADER_SIZE: %d\n", LEAF_NODE_HEADER_SIZE)
+	fmt.Printf("LEAF_NODE_CELL_SIZE: %d\n", LEAF_NODE_CELL_SIZE)
+	fmt.Printf("LEAF_NODE_SPACE_FOR_CELLS: %d\n", LEAF_NODE_SPACE_FOR_CELLS)
+	fmt.Printf("LEAF_NODE_MAX_CELLS: %d\n", LEAF_NODE_MAX_CELLS)
 }
 
-func tableEnd(table *Table) *Cursor {
-	cursor := &Cursor{}
-	cursor.table = table
-	cursor.pageNum = table.rootPageNum
-	rootNode := getPage(table.Pager, table.rootPageNum)
-	numCells, _ := leafNodeNumCells(rootNode)
-	cursor.cellNum = int(numCells)
-	cursor.tableEnd = true
-	return cursor
-}
-
-func tableFind(table *Table, key int) *Cursor {
-	rootPageNum := table.rootPageNum
-	rootNode := getPage(table.Pager, rootPageNum)
-	rootNodeType := getNodeType(rootNode)
-	if rootNodeType == NODE_LEAF {
-		return leafNodeFind(table, rootPageNum, key)
-	} else {
-		fmt.Printf("Need to implement searching an internal node\n")
+// 获取存储对应页面的指针
+func getPage(pager *Pager, pageNum int) unsafe.Pointer {
+	if pageNum > TABLE_MAX_PAGES {
+		fmt.Printf("Tried to fetch page number out of bounds. %d > %d", pageNum, TABLE_MAX_PAGES)
 		os.Exit(0)
-		return nil
 	}
-}
-
-func leafNodeFind(table *Table, pageNum int, key int) *Cursor {
-	node := getPage(table.Pager, pageNum)
-	numCells, _ := leafNodeNumCells(node)
-	cursor := &Cursor{}
-	cursor.table = table
-	cursor.pageNum = pageNum
-
-	left, right := 0, numCells-1
-	for left <= right {
-		mid := left + (right-left)/2
-		p := (*[LEAF_NODE_KEY_SIZE]byte)(leafNodeKey(node, mid))
-		midKey := int(BytesToInt32(p[:]))
-		if key == midKey {
-			cursor.cellNum = mid
-			return cursor
-		} else if key >= midKey {
-			left = mid + 1
-		} else {
-			right = mid - 1
+	//如果页面不存在
+	if pager.pages[pageNum] == nil {
+		//使用byte存储值
+		page := make([]byte, PAGE_SIZE)
+		//获取当前数据库中的数据页面数量
+		numPages := int(pager.fileLength / PAGE_SIZE)
+		if pager.fileLength%PAGE_SIZE == 0 {
+			numPages += 1
+		}
+		//当需要读取的页面在数据库中存在时
+		if pageNum <= numPages {
+			offset := pageNum * PAGE_SIZE
+			//将文件的读标偏移
+			curNum, err := pager.fs.Seek(int64(offset), io.SeekStart)
+			if err != nil {
+				panic(err)
+			}
+			//将文件中的数据读取到页面中
+			if _, err = pager.fs.ReadAt(page, curNum); err != nil && err != io.EOF {
+				panic(err)
+			}
+		}
+		//更新页面指针和页面数量
+		pager.pages[pageNum] = unsafe.Pointer(&page[0])
+		if pageNum >= pager.numPages {
+			pager.numPages = pageNum + 1
 		}
 	}
-	cursor.cellNum = left
-	return cursor
+	return pager.pages[pageNum]
 }
 
+// 根据level打印
+func indent(level int) {
+	for i := 0; i < level; i++ {
+		fmt.Print(" ")
+	}
+}
+
+func printTree(pager *Pager, pageNum int, indentationLevel int) {
+	node := getPage(pager, pageNum)
+	var numKeys, child int
+	switch getNodeType(node) {
+	case NODE_LEAF:
+		numKeys, _ = leafNodeNumCells(node)
+		indent(indentationLevel)
+		fmt.Printf("- leaf (size %d)\n", numKeys)
+		for i := 0; i < numKeys; i++ {
+			indent(indentationLevel + 1)
+			fmt.Printf("- %d\n", leafNodeKey(node, i))
+		}
+	case NODE_INTERNAL:
+		numKeys, _ = internalNodeNumKeys(node)
+		indent(indentationLevel)
+		fmt.Printf("- internal (size %d)\n", numKeys)
+		for i := 0; i < numKeys; i++ {
+			child, _ = internalNodeChild(node, i)
+			printTree(pager, child, indentationLevel+1)
+
+			indent(indentationLevel + 1)
+			t, _ := internalNodeKey(node, i)
+			fmt.Printf("- key %d\n", t)
+		}
+		child, _ = internalNodeRightChild(node)
+		printTree(pager, child, indentationLevel+1)
+	}
+}
+
+// 将输入存储至页面
+func serializeRow(source *Row, destination unsafe.Pointer) {
+	id := Uint32ToBytes(source.ID)
+	q := (*[ROW_SIZE]byte)(destination)
+	copy(q[ID_OFFSET:ID_SIZE], id)
+	copy(q[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE], source.UserName)
+	copy(q[EMAIL_OFFSET:ROW_SIZE], source.Email)
+}
+
+// 将页面中的数据输出到对应结构体
+func deserializeRow(source unsafe.Pointer, destination *Row) {
+	id := make([]byte, ID_SIZE, ID_SIZE)
+	sourceBuf := (*[ROW_SIZE]byte)(source)
+	copy(id, sourceBuf[ID_OFFSET:ID_SIZE])
+
+	destination.ID = BytesToInt32(id)
+	username := make([]byte, USERNAME_SIZE, USERNAME_SIZE)
+	copy(username, sourceBuf[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE])
+	destination.UserName = string(username)
+
+	email := make([]byte, EMAIL_SIZE, EMAIL_SIZE)
+	copy(email, sourceBuf[EMAIL_OFFSET:ROW_SIZE])
+	destination.Email = string(email)
+}
+
+// 从对应游标中查找对应的值
+func cursorValue(cursor *Cursor) unsafe.Pointer {
+	pageNum := cursor.pageNum
+	page := getPage(cursor.table.Pager, pageNum)
+	return leafNodeValue(page, cursor.cellNum)
+}
+
+// 将游标移向下一个节点
 func cursorAdvance(cursor *Cursor) {
 	pageNum := cursor.pageNum
 	node := getPage(cursor.table.Pager, pageNum)
+	// 将cellNum查找的值加1，移向下一个cell
 	cursor.cellNum += 1
+	// 如果超出当前的node的最大cells，则移向下一个叶子节点
 	if cells, _ := leafNodeNumCells(node); cursor.cellNum >= cells {
-		cursor.tableEnd = true
+		//cursor.tableEnd = true
+		nextPageNum, _ := leafNodeNextLeaf(node)
+		if nextPageNum == 0 {
+			cursor.tableEnd = true
+		} else {
+			cursor.pageNum = nextPageNum
+			cursor.cellNum = 0
+		}
 	}
 }
+
+// 打开页面
 func pageOpen(filename string) (*Pager, error) {
 	fs, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
@@ -174,6 +250,7 @@ func pageOpen(filename string) (*Pager, error) {
 	return pager, nil
 }
 
+// 打开数据库存储文件
 func dbOpen(filename string) *Table {
 	table := &Table{}
 	table.Pager, _ = pageOpen(filename)
@@ -181,18 +258,9 @@ func dbOpen(filename string) *Table {
 	if table.Pager.numPages == 0 {
 		rootNode := getPage(table.Pager, 0)
 		initLeafNode(rootNode)
+		setNodeRoot(rootNode, true)
 	}
 	return table
-}
-
-func dbClose(table *Table) {
-	for i := 0; i < table.Pager.numPages; i++ {
-		if table.Pager.pages[i] == nil {
-			continue
-		}
-		pageFlush(table.Pager, i)
-	}
-	defer table.Pager.fs.Close()
 }
 
 // pagerFlush 这一页写入文件系统
@@ -207,8 +275,10 @@ func pageFlush(pager *Pager, pageNum int) error {
 	if offset == -1 {
 		return fmt.Errorf("offset %v", offset)
 	}
+	originBuf := make([]byte, PAGE_SIZE)
 	buf := (*[PAGE_SIZE]byte)(pager.pages[pageNum])
-	bytesWritten, err := pager.fs.WriteAt(buf[:], PAGE_SIZE)
+	copy(originBuf[:PAGE_SIZE], buf[:PAGE_SIZE])
+	bytesWritten, err := pager.fs.WriteAt(originBuf, offset)
 	if err != nil {
 		return fmt.Errorf("write %v", err)
 	}
@@ -217,7 +287,105 @@ func pageFlush(pager *Pager, pageNum int) error {
 	return nil
 }
 
+// 关闭数据库，将数据存储在数据库
+func dbClose(table *Table) {
+	for i := 0; i < table.Pager.numPages; i++ {
+		if table.Pager.pages[i] == nil {
+			continue
+		}
+		pageFlush(table.Pager, i)
+	}
+	defer table.Pager.fs.Close()
+}
+
+// 执行基础的命令
+func doMetaCommand(input string, table *Table) metaCommandType {
+	if input == ".exit" {
+		dbClose(table)
+		os.Exit(1)
+		return metaCommandSuccess
+	}
+	if input == ".btree" {
+		fmt.Printf("Tree:\n")
+		printTree(table.Pager, 0, 0)
+		return metaCommandSuccess
+	}
+	if input == ".constants" {
+		fmt.Printf("Constants:\n")
+		printConstants()
+		return metaCommandSuccess
+	}
+	return metaCommandUnRecognizedCommand
+}
+
+// 对基础语句进行处理
+func prepareStatement(input string, statement *Statement) PrepareType {
+	if len(input) > 6 && input[:6] == "insert" {
+		statement.statementType = STATEMENT_INSERT
+		inputs := strings.Split(input, " ")
+		if len(inputs) < 1 {
+			return PREPARE_UNRECOGNIZED_STATEMENT
+		}
+		id, err := strconv.ParseInt(inputs[1], 10, 32)
+		if err != nil {
+			return PREPARE_UNRECOGNIZED_STATEMENT
+		}
+		if id < 0 {
+			return PREPARE_NEGATIVE_ID
+		}
+		statement.Row.ID = int32(id)
+		statement.Row.UserName = inputs[2]
+		statement.Row.Email = inputs[3]
+		return PREPARE_SUCCESS
+	}
+	if len(input) >= 6 && input[:6] == "select" {
+		statement.statementType = STATEMENT_SELECT
+		return PREPARE_SUCCESS
+	}
+	return PREPARE_UNRECOGNIZED_STATEMENT
+}
+
+func executeInsert(statement *Statement, table *Table) ExecuteResultType {
+	row := statement.Row
+	cursor := tableFind(table, int(row.ID))
+	node := getPage(table.Pager, cursor.pageNum)
+	numCells, _ := leafNodeNumCells(node)
+	if cursor.cellNum < numCells {
+		p := leafNodeKey(node, cursor.cellNum)
+		indexKey := BytesToInt32((*[LEAF_NODE_KEY_SIZE]byte)(p)[:])
+		if indexKey == row.ID {
+			return EXECUTE_DUPLICATE_KEY
+		}
+	}
+	leafNodeInsert(cursor, int(row.ID), row)
+	return EXECUTE_SUCCESS
+}
+
+func executeSelect(statement *Statement, table *Table) ExecuteResultType {
+	var row Row
+	cursor := tableStart(table)
+	for !cursor.tableEnd {
+		deserializeRow(cursorValue(cursor), &row)
+		printRow(&row)
+		cursorAdvance(cursor)
+	}
+	return EXECUTE_SUCCESS
+}
+
+func executeStatement(statement *Statement, table *Table) ExecuteResultType {
+	switch statement.statementType {
+	case STATEMENT_SELECT:
+		return executeSelect(statement, table)
+	case STATEMENT_INSERT:
+		return executeInsert(statement, table)
+	}
+	return EXECUTE_SUCCESS
+}
+
 func main() {
+	run()
+}
+func run() {
 	table := dbOpen("./1.db")
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -259,41 +427,6 @@ func main() {
 	}
 }
 
-func getPage(pager *Pager, pageNum int) unsafe.Pointer {
-	if pageNum > TABLE_MAX_PAGES {
-		fmt.Printf("Tried to fetch page number out of bounds. %d > %d", pageNum, TABLE_MAX_PAGES)
-		os.Exit(0)
-	}
-	if pager.pages[pageNum] == nil {
-		page := make([]byte, PAGE_SIZE)
-		numPages := int(pager.fileLength / PAGE_SIZE)
-		if pager.fileLength%PAGE_SIZE == 0 {
-			numPages += 1
-		}
-		if pageNum <= numPages {
-			offset := numPages * PAGE_SIZE
-			curNum, err := pager.fs.Seek(int64(offset), io.SeekStart)
-			if err != nil {
-				panic(err)
-			}
-			if _, err = pager.fs.ReadAt(page, curNum); err != nil && err != io.EOF {
-				panic(err)
-			}
-		}
-		pager.pages[pageNum] = unsafe.Pointer(&page[0])
-		if pageNum >= pager.numPages {
-			pager.numPages = pageNum + 1
-		}
-	}
-	return pager.pages[pageNum]
-}
-
-func cursorValue(cursor *Cursor) unsafe.Pointer {
-	pageNum := cursor.pageNum
-	page := getPage(cursor.table.Pager, pageNum)
-	return leafNodeValue(page, cursor.cellNum)
-}
-
 func Uint32ToBytes(id int32) []byte {
 	x := uint32(id)
 	buf := bytes.NewBuffer([]byte{})
@@ -307,130 +440,17 @@ func BytesToInt32(buf []byte) int32 {
 	binary.Read(bufs, binary.BigEndian, &x)
 	return x
 }
-func serializeRow(source *Row, destination unsafe.Pointer) {
-	id := Uint32ToBytes(source.ID)
-	q := (*[ROW_SIZE]byte)(destination)
-	copy(q[ID_OFFSET:ID_SIZE], id)
-	copy(q[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE], source.UserName)
-	copy(q[EMAIL_OFFSET:ROW_SIZE], source.Email)
-	fmt.Println(q)
-}
 
-func deserializeRow(source unsafe.Pointer, destination *Row) {
-	id := make([]byte, ID_SIZE, ID_SIZE)
-	sourceBuf := (*[ROW_SIZE]byte)(source)
-	copy(id, sourceBuf[ID_OFFSET:ID_SIZE])
-	destination.ID = BytesToInt32(id)
-	username := make([]byte, USERNAME_SIZE, USERNAME_SIZE)
-	copy(username, sourceBuf[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE])
-	destination.UserName = string(username)
-	email := make([]byte, EMAIL_SIZE, EMAIL_SIZE)
-	copy(email, sourceBuf[EMAIL_OFFSET:ROW_SIZE])
-	destination.Email = string(email)
-}
+var idx int = 0
 
-func prepareStatement(input string, statement *Statement) PrepareType {
-	if len(input) > 6 && input[:6] == "insert" {
-		statement.statementType = STATEMENT_INSERT
-		inputs := strings.Split(input, " ")
-		if len(inputs) < 1 {
-			return PREPARE_UNRECOGNIZED_STATEMENT
-		}
-		id, err := strconv.ParseInt(inputs[1], 10, 32)
-		if err != nil {
-			return PREPARE_UNRECOGNIZED_STATEMENT
-		}
-		if id < 0 {
-			return PREPARE_NEGATIVE_ID
-		}
-		statement.Row.ID = int32(id)
-		statement.Row.UserName = inputs[2]
-		statement.Row.Email = inputs[3]
-		return PREPARE_SUCCESS
+func readInput_(reader *bufio.Reader) (string, error) {
+	idx++
+	s := fmt.Sprintf("insert %d user%d person1@example.com", idx, idx)
+	if idx == 13 {
+		s = fmt.Sprintf("select")
+		s = fmt.Sprintf(".exit")
 	}
-	if len(input) >= 6 && input[:6] == "select" {
-		statement.statementType = STATEMENT_SELECT
-		return PREPARE_SUCCESS
-	}
-	return PREPARE_UNRECOGNIZED_STATEMENT
-}
-
-func executeStatement(statement *Statement, table *Table) ExecuteResultType {
-	switch statement.statementType {
-	case STATEMENT_SELECT:
-		return executeSelect(statement, table)
-	case STATEMENT_INSERT:
-		return executeInsert(statement, table)
-	}
-	return EXECUTE_SUCCESS
-}
-
-func executeSelect(statement *Statement, table *Table) ExecuteResultType {
-	var row Row
-	cursor := tableStart(table)
-	for !cursor.tableEnd {
-		deserializeRow(cursorValue(cursor), &row)
-		printRow(&row)
-		cursorAdvance(cursor)
-	}
-	return EXECUTE_SUCCESS
-}
-
-func executeInsert(statement *Statement, table *Table) ExecuteResultType {
-	node := getPage(table.Pager, table.rootPageNum)
-	numCells, _ := leafNodeNumCells(node)
-	if numCells >= LEAF_NODE_MAX_CELLS {
-		return EXECUTE_TABLE_FULL
-	}
-
-	row := statement.Row
-	cursor := tableFind(table, int(row.ID))
-	if cursor.cellNum < numCells {
-		p := leafNodeKey(node, cursor.cellNum)
-		buf := (*[LEAF_NODE_KEY_SIZE]byte)(p)
-		indexKey := BytesToInt32(buf[:])
-		if indexKey == row.ID {
-			return EXECUTE_DUPLICATE_KEY
-		}
-	}
-	leafNodeInsert(cursor, int(row.ID), row)
-	return EXECUTE_SUCCESS
-}
-func doMetaCommand(input string, table *Table) metaCommandType {
-	if input == ".exit" {
-		dbClose(table)
-		os.Exit(1)
-		return metaCommandSuccess
-	}
-	if input == ".btree" {
-		fmt.Printf("Tree:\n")
-		printLeafNode(getPage(table.Pager, 0))
-		return metaCommandSuccess
-	}
-	if input == ".constants" {
-		fmt.Printf("Constants:\n")
-		printConstants()
-		return metaCommandSuccess
-	}
-	return metaCommandUnRecognizedCommand
-}
-
-func printLeafNode(node unsafe.Pointer) {
-	numCells, _ := leafNodeNumCells(node)
-	fmt.Printf("leaf (size %d)\n", numCells)
-	for i := 0; i < numCells; i++ {
-		key := (*int)(leafNodeKey(node, i))
-		fmt.Printf("  - %d : %d\n", i, key)
-	}
-}
-
-func printConstants() {
-	fmt.Printf("ROW_SIZE: %d\n", ROW_SIZE)
-	fmt.Printf("COMMON_NODE_HEADER_SIZE: %d\n", COMMON_NODE_HEADER_SIZE)
-	fmt.Printf("LEAF_NODE_HEADER_SIZE: %d\n", LEAF_NODE_HEADER_SIZE)
-	fmt.Printf("LEAF_NODE_CELL_SIZE: %d\n", LEAF_NODE_CELL_SIZE)
-	fmt.Printf("LEAF_NODE_SPACE_FOR_CELLS: %d\n", LEAF_NODE_SPACE_FOR_CELLS)
-	fmt.Printf("LEAF_NODE_MAX_CELLS: %d\n", LEAF_NODE_MAX_CELLS)
+	return s, nil
 }
 
 func readInput(reader *bufio.Reader) (string, error) {
@@ -455,7 +475,6 @@ func readInput(reader *bufio.Reader) (string, error) {
 func printPrompt() {
 	fmt.Print("db>")
 }
-
 func printRow(row *Row) {
 	fmt.Printf("(%d,%s,%s)\n", row.ID, row.UserName, row.Email)
 }
