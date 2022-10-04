@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<textarea style="width: 300px;height: 400px" id="show"></textarea>
+</body>
+<script type="text/javascript" src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.js"></script>
+<script>
+    $.ajax({
+        url:"http://localhost:8000/set",
+        type: "GET",
+        success:function (){
+            console.log("set success")
+        }
+    })
+   var source=new EventSource("http://localhost:8000/")
+   source.onopen=function (e){
+       console.log("连接用户")
+   }
+   source.onmessage=function (e){
+       $("#show").append(e.data+"\n")
+   }
+   source.onerror=function (e){
+       console.log(e)
+   }
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+  <textarea id="show" style="width: 300px;height: 400px"></textarea>
+</body>
+<script type="text/javascript" src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.js"></script>
+<script>
+    $.ajax({
+        url:"http://localhost:8000/set",
+        type: "GET",
+        success:function (){
+            console.log("set success")
+        }
+    })
+    var k=setInterval(function (){
+        $.ajax({
+            url:"http://localhost:8000/",
+            type:"GET",
+            success:function (data){
+                if (data!="timeout"){
+                    $("#show").append(data+"\n")
+                    clearInterval(k)
+                    console.log("close interval")
+                }
+            }
+        })
+    },2000)
+</script>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<textarea style="width: 300px;height: 400px" id="show"></textarea>
+</body>
+<script type="text/javascript" src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.js"></script>
+<script>
+    $.ajax({
+        url:"http://localhost:8000/set",
+        type: "GET",
+        success:function (){
+            console.log("set success")
+        }
+    })
+    function longpoll (){
+        $.ajax({
+            type:"GET",
+            url:"http://localhost:8000/",
+            timeout:6000,
+            error: function (data,err) {
+                if (err=="timeout"){
+                    console.log(err)
+                    longpoll()
+                }
+            },
+            success: function (data){
+                if (data!="timeout"){
+                    $("#show").append(data+"\n")
+                }else {
+                    console.log(data)
+                    longpoll()
+                }
+            }
+        })
+    }
+    longpoll()
+</script>
+</html>
