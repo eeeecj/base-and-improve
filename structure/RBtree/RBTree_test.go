@@ -1,6 +1,7 @@
 package RBtree
 
 import (
+	"fmt"
 	"log"
 	"testing"
 )
@@ -51,22 +52,16 @@ func TestInsertAndDelete(t *testing.T) {
 	rbt := NewRBTree()
 
 	var m Int = 0
-	var n Int = 1000
+	var n Int = 8
 	for m < n {
-		rbt.Insert(&RBNode{
-			Parent: nil,
-			Left:   nil,
-			Right:  nil,
-			color:  false,
-			Item:   nil,
-		})
+		rbt.Insert(Item(m))
 		m++
 	}
-	if rbt.Len() != uint(n) {
+	if rbt.Len() != int(n) {
 		t.Errorf("tree.Len() = %d, expect %d", rbt.Len(), n)
 	}
-
 	for m > 0 {
+		fmt.Println(m)
 		rbt.Delete(Int(m))
 		m--
 	}

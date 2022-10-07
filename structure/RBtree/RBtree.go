@@ -67,7 +67,7 @@ func (r *RBTree) RightRotate(node *RBNode) {
 	}
 	pivot := node.Left
 	pivotR := pivot.Right
-	node.Right = pivotR
+	node.Left = pivotR
 	if pivotR != r.NIL {
 		pivotR.Parent = node
 	}
@@ -96,7 +96,7 @@ func (r *RBTree) insert(node *RBNode) *RBNode {
 	//二分查找对应节点的值
 	for x != r.NIL {
 		y = x
-		if node.Item.Less(x.Item) {
+		if node.Less(x.Item) {
 			x = x.Left
 		} else if x.Less(node.Item) {
 			x = x.Right
@@ -194,10 +194,10 @@ func (r *RBTree) Search(node *RBNode) *RBNode {
 		} else if node.Less(p.Item) {
 			p = p.Left
 		} else {
-			return p
+			break
 		}
 	}
-	return r.NIL
+	return p
 }
 
 func (r *RBTree) successor(node *RBNode) *RBNode {
@@ -226,7 +226,7 @@ func (r *RBTree) Delete(item Item) Item {
 		Right:  r.NIL,
 		color:  RED,
 		Item:   item,
-	})
+	}).Item
 }
 
 func (r *RBTree) delete(node *RBNode) *RBNode {
@@ -263,7 +263,7 @@ func (r *RBTree) delete(node *RBNode) *RBNode {
 
 	//如果y是根节点，则更新根节点
 	if y.Parent == r.NIL {
-		r.root = node
+		r.root = x
 	} else if y == y.Parent.Left {
 		//删除当前节点
 		y.Parent.Left = x
@@ -308,7 +308,7 @@ func (r *RBTree) deleteFixUp(node *RBNode) {
 				//case 2.3：兄弟节点为黑色，且兄弟节点的左节点为红色
 				// 将兄弟节点的左节点设置为黑色，兄弟节点设置为红色，
 				//以兄弟节点右旋，到达情况case 2.4
-				if w.Left.color == RED {
+				if w.Right.color == BLACK {
 					w.Left.color = BLACK
 					w.color = RED
 					r.RightRotate(w)
@@ -342,7 +342,7 @@ func (r *RBTree) deleteFixUp(node *RBNode) {
 				}
 				w.color = node.Parent.color
 				node.Parent.color = BLACK
-				node.Left.color = BLACK
+				w.Left.color = BLACK
 				r.RightRotate(node.Parent)
 				node = r.root
 			}
